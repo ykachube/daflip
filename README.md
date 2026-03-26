@@ -10,6 +10,8 @@ A fullscreen split-flap board for your browser — rotating quotes, live weather
 
 ## Preview
 
+![Split-Flap Display](screenshot.png)
+
 > Fullscreen black board. Tiles flip one by one with authentic click sounds.  
 > Content rotates every 12 seconds. Click anywhere to skip ahead.
 
