@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Split-Flap Display</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@700&display=swap" rel="stylesheet"/>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --black:        #0a0a0a;
+    --tile-bg:      #111;
+    --tile-border:  #222;
+    --white:        #f0ede6;
+    --dim:          #2a2a2a;
+    --orange:       #f05a28;
+  }
+
+  html, body {
+    width: 100vw; height: 100vh;
+    background: var(--black);
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ── Tile grid ── */
+  #grid {
+    display: grid;
+    gap: 3px;
+  }
+
+  .tile {
+    perspective: 300px;
+    position: relative;
+  }
+
+  .tile-face {
+    width: 100%; height: 100%;
+    background: var(--tile-bg);
+    border: 1px solid var(--tile-border);
+    border-radius: 3px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Oswald', sans-serif;
+    font-weight: 700;
+    color: var(--dim);
+    overflow: hidden;
+    position: relative;
+    user-select: none;
+  }
+
+  /* crease */
+  .tile-face::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 0; right: 0;
+    height: 1px;
+    background: rgba(0,0,0,.8);
+    pointer-events: none;
+  }
+
+  .tile-face.active {
+    color: var(--white);
+    text-shadow: 0 0 10px rgba(240,237,230,.35);
+  }
+
+  .tile.flipping .tile-face {
+    animation: flip .18s ease-in-out forwards;
+  }
+
+  @keyframes flip {
+    0%   { transform: rotateX(0deg); }
+    45%  { transform: rotateX(-90deg); opacity: .3; }
+    55%  { transform: rotateX(-90deg); opacity: .3; }
+    100% { transform: rotateX(0deg); }
+  }
+</style>
+</head>
+<body>
+<div id="grid"></div>
+
+<script>
+// ── Layout: fill viewport with tiles ──────────────────────────────────────────
+const TILE_W = 46, TILE_H = 58, GAP = 3;
+
+function calcGrid() {
+  const cols = Math.floor((window.innerWidth  + GAP) / (TILE_W + GAP));
+  const rows = Math.floor((window.innerHeight + GAP) / (TILE_H + GAP));
+  return { cols, rows };
+}
+
+let COLS, ROWS;
+const gridEl = document.getElementById('grid');
+let tiles = [];
+
+function buildGrid() {
+  let { cols, rows } = calcGrid();
+  COLS = cols; ROWS = rows;
+  gridEl.style.gridTemplateColumns = `repeat(${COLS}, ${TILE_W}px)`;
+  gridEl.style.gridTemplateRows    = `repeat(${ROWS}, ${TILE_H}px)`;
+  gridEl.innerHTML = '';
+  tiles = [];
+  for (let r = 0; r < ROWS; r++) {
+    tiles[r] = [];
+    for (let c = 0; c < COLS; c++) {
+      const el = document.createElement('div');
+      el.className = 'tile';
+      const face = document.createElement('div');
+      face.className = 'tile-face';
+      face.style.fontSize = Math.round(TILE_H * 0.52) + 'px';
+      face.textContent = ' ';
+      el.appendChild(face);
+      gridEl.appendChild(el);
+      tiles[r][c] = { el, face, char: ' ' };
+    }
+  }
+}
+
+// ── Audio ─────────────────────────────────────────────────────────────────────
+let audioCtx = null;
+
+function playTick() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.025, audioCtx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++)
+      d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (audioCtx.sampleRate * 0.006));
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    const gain = audioCtx.createGain(); gain.gain.value = 0.07;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'bandpass'; filter.frequency.value = 2400; filter.Q.value = 0.9;
+    src.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+    src.start();
+  } catch(e) {}
+}
+
+// ── Display ───────────────────────────────────────────────────────────────────
+function textToGrid(text) {
+  const out = Array.from({ length: ROWS }, () => Array(COLS).fill(' '));
+  const lines = text.split('\n').map(l => l.trim());
+  const startRow = Math.max(0, Math.floor((ROWS - lines.length) / 2));
+  for (let li = 0; li < lines.length && startRow + li < ROWS; li++) {
+    const line = lines[li].substring(0, COLS);
+    const startCol = Math.floor((COLS - line.length) / 2);
+    for (let ci = 0; ci < line.length; ci++)
+      out[startRow + li][startCol + ci] = line[ci];
+  }
+  return out;
+}
+
+const STAGGER = 14; // ms between tile flips
+
+function displayContent(text) {
+  const g = textToGrid(text);
+  let delay = 0;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const ch = g[r][c];
+      const tile = tiles[r][c];
+      if (ch === tile.char) continue;
+      tile.char = ch;
+      const isActive = ch !== ' ';
+      ;((t, f, active) => {
+        setTimeout(() => {
+          playTick();
+          t.classList.add('flipping');
+          f.classList.toggle('active', active);
+          f.textContent = ch;
+          setTimeout(() => t.classList.remove('flipping'), 220);
+        }, delay);
+      })(tile.el, tile.face, isActive);
+      delay += STAGGER;
+    }
+  }
+}
+
+// ── Content fetch ─────────────────────────────────────────────────────────────
+let timer = null;
+const INTERVAL = 12000;
+
+async function fetchAndShow() {
+  try {
+    const r = await fetch('/api/content');
+    const d = await r.json();
+    let text = d.text;
+    if (d.source) text += `\n\n— ${d.source}`;
+    displayContent(text);
+  } catch(e) {
+    displayContent('CONNECTION\nERROR');
+  }
+  timer = setTimeout(fetchAndShow, INTERVAL);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+buildGrid();
+
+// Show local time immediately
+;(() => {
+  const now = new Date();
+  const day  = now.toLocaleDateString('en-US', {weekday:'long'}).toUpperCase();
+  const date = now.toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'}).toUpperCase();
+  const time = now.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'}).toUpperCase();
+  displayContent(`${day}\n${date}\n${time}`);
+})();
+
+setTimeout(fetchAndShow, 1800);
+
+// Rebuild on resize
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { buildGrid(); fetchAndShow(); }, 300);
+});
+
+// Click anywhere to advance
+document.addEventListener('click', () => {
+  clearTimeout(timer);
+  fetchAndShow();
+});
+</script>
+</body>
+</html>
